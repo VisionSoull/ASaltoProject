@@ -10,6 +10,8 @@ public class ASaltoProjectEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V7;
 
-		ExtraModuleNames.AddRange( new string[] { "ASaltoProject" } );
+        IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
+
+        ExtraModuleNames.AddRange( new string[] { "ASaltoProject" } );
 	}
 }

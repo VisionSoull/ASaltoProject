@@ -7,6 +7,7 @@
 
 # Visual Studio Code
 *.code-workspace
+.vscode
 
 # Compiled Object files
 *.slo

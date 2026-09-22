@@ -16,9 +16,11 @@ public class ASaltoProject : ModuleRules
 			"CinematicCamera",
 			"NavigationSystem",
    			"AIModule",
-			"UMG",
-			"Slate",
-			"SlateCore"
+            "GameplayTags",
+            "UMG",
+            "Slate",
+			"SlateCore",
+			"MotionWarping"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
