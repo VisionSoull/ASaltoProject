@@ -13,6 +13,7 @@ public class ASaltoProject : ModuleRules
 			"CoreUObject", 
 			"Engine", 
 			"InputCore",
+			"EnhancedInput",
 			"CinematicCamera",
 			"NavigationSystem",
    			"AIModule",
@@ -20,7 +21,8 @@ public class ASaltoProject : ModuleRules
             "UMG",
             "Slate",
 			"SlateCore",
-			"MotionWarping"
+			"MotionWarping",
+			"AnimGraphRuntime"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
