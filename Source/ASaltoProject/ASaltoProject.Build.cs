@@ -7,20 +7,24 @@ public class ASaltoProject : ModuleRules
 	public ASaltoProject(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-	
-		PublicDependencyModuleNames.AddRange(new string[] { 
+
+        PublicDependencyModuleNames.AddRange(new string[] { 
 			"Core", 
 			"CoreUObject", 
 			"Engine", 
 			"InputCore",
 			"EnhancedInput",
-			"CinematicCamera",
 			"NavigationSystem",
    			"AIModule",
             "GameplayTags",
             "UMG",
             "Slate",
 			"SlateCore",
+			//Camera
+			"CinematicCamera",
+			// Interaction
+			"DeveloperSettings",
+			// Animation
 			"MotionWarping",
 			"AnimGraphRuntime"
 		});
