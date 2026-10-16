@@ -4,20 +4,30 @@
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "../Settings/InteractionSettings.h"
+#include "../Components/InteractionComponent.h"
+#include "../Components/InteractionFeedbackComponent.h"
 
-AInteractableBase::AInteractableBase()
+AInteractableBase::AInteractableBase(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = false;
 
-	// Create root scene component
-	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
-	SetRootComponent(Root);
+	// Optional so subclasses whose mesh must be the root (physics movables) can skip it
+	USceneComponent* Root = CreateOptionalDefaultSubobject<USceneComponent>(TEXT("Root"));
+	if (Root)
+	{
+		SetRootComponent(Root);
+	}
 
 	// Create interactable mesh
 	BaseMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BaseMesh"));
 	BaseMesh->SetupAttachment(RootComponent);
 	BaseMesh->SetCollisionProfileName("Interactable");
 	BaseMesh->SetComponentTickEnabled(false);
+
+	// Empty until the Blueprint calls ShowWidget; profile chosen per object or from Interaction Settings
+	FeedbackComponent = CreateDefaultSubobject<UInteractionFeedbackComponent>(TEXT("InteractionFeedback"));
+	FeedbackComponent->SetupAttachment(RootComponent);
 }
 
 void AInteractableBase::BeginPlay()
@@ -43,6 +53,7 @@ void AInteractableBase::BeginFocus_Implementation(ACharacter* Character, UPrimit
 	CurrentlyFocusedComponent = FocusedComponent;
 	CurrentlyFocusingCharacter = Character;
 	UpdateFocusVisual();
+	OnFocusGained(Character, FocusedComponent);
 }
 
 void AInteractableBase::EndFocus_Implementation(ACharacter* Character, UPrimitiveComponent* FocusedComponent)
@@ -51,13 +62,30 @@ void AInteractableBase::EndFocus_Implementation(ACharacter* Character, UPrimitiv
 	CurrentlyFocusedComponent = nullptr;
 	CurrentlyFocusingCharacter = nullptr;
 	UpdateFocusVisual();
+	OnFocusLost(Character);
+}
+
+void AInteractableBase::BeginRange_Implementation(ACharacter* Character)
+{
+	OnRangeEntered(Character);
+}
+
+void AInteractableBase::EndRange_Implementation(ACharacter* Character)
+{
+	OnRangeExited(Character);
 }
 
 bool AInteractableBase::CanInteract_Implementation(ACharacter* Character) const
 {
-	// Default: always can interact
-	// Derived classes override for specific conditions
-	return true;
+	// Derived classes add their own conditions on top of this
+	return IsInteractorAllowed(Character);
+}
+
+bool AInteractableBase::IsInteractorAllowed(const ACharacter* Character) const
+{
+	const UInteractionComponent* InteractionComp = Character ? Character->FindComponentByClass<UInteractionComponent>() : nullptr;
+	const EInteractorRole InteractorRole = InteractionComp ? InteractionComp->InteractorRole : EInteractorRole::None;
+	return InteractorRules::IsRoleAllowed(AllowedInteractor, InteractorRole);
 }
 
 void AInteractableBase::UpdateFocusVisual()

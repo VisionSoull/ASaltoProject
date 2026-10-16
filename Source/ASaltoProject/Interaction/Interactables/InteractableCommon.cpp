@@ -101,6 +101,11 @@ void AInteractableCommon::BeginFocus_Implementation(ACharacter* Character, UPrim
 
 bool AInteractableCommon::CanInteract_Implementation(ACharacter* Character) const
 {
+	if (!Super::CanInteract_Implementation(Character))
+	{
+		return false;
+	}
+
 	if (!bIsActive)
 	{
 		return false;

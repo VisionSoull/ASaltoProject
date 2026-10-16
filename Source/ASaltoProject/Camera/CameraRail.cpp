@@ -15,6 +15,11 @@
 
 ACameraRail::ACameraRail()
 {
+    // ==================================================================================
+    // Constructor
+    // - Spline and Cine Camera
+    // - Attaches components and sets up a simple default spline with two points
+    // ==================================================================================
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.bStartWithTickEnabled = true;
 
@@ -39,6 +44,13 @@ ACameraRail::ACameraRail()
 
 void ACameraRail::BeginPlay()
 {
+    // ==================================================================================
+    // BeginPlay
+    // - Ensures initial/current rail position is set
+    // - Resets camera shake state
+    // - Applies focus settings to the cine camera
+    // - Starts a repeating timer to search and bind the player actor
+    // ==================================================================================
     Super::BeginPlay();
 
     UWorld* World = GetWorld();
@@ -66,26 +78,13 @@ void ACameraRail::BeginPlay()
     );
 }
 
-void ACameraRail::BecomeViewTarget(APlayerController* PC)
-{
-    Super::BecomeViewTarget(PC);
-
-    bIsActiveViewTarget = true;
-
-    UE_LOG(LogTemp, Log, TEXT("CameraRail [%s]: Became active view target"), *GetName());
-}
-
-void ACameraRail::EndViewTarget(APlayerController* PC)
-{
-    Super::EndViewTarget(PC);
-
-    bIsActiveViewTarget = false;
-
-    UE_LOG(LogTemp, Log, TEXT("CameraRail [%s]: No longer view target"), *GetName());
-}
-
 void ACameraRail::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    // ==================================================================================
+    // EndPlay
+    // Clean up timers and active camera shakes when the actor is being removed or the
+    // level is being unloaded. Ensures no lingering timers or shake references remain.
+    // ==================================================================================
     Super::EndPlay(EndPlayReason);
 
     UWorld* World = GetWorld();
@@ -104,6 +103,14 @@ void ACameraRail::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ACameraRail::Tick(float DeltaTime)
 {
+    // ==================================================================================
+    // Tick
+    // When the actor is the active view target and the world is running the game/PIE:
+    // - Optionally auto-deactivate when no longer the view target
+    // - Update player-following logic, camera position, rotation and shake
+    // - Optionally draw debug information
+    // In editor mode the spline debug drawing is also handled here.
+    // ==================================================================================
     Super::Tick(DeltaTime);
 
     if (!SplineComponent || !CameraComponent)
@@ -144,6 +151,11 @@ void ACameraRail::Tick(float DeltaTime)
 #if WITH_EDITOR
 void ACameraRail::OnConstruction(const FTransform& Transform)
 {
+    // ==================================================================================
+    // OnConstruction
+    // Updates spline debug visibility and camera focus settings to reflect
+    // current property values immediately in the editor viewport.
+    // ==================================================================================
     Super::OnConstruction(Transform);
 
     if (SplineComponent)
@@ -155,8 +167,46 @@ void ACameraRail::OnConstruction(const FTransform& Transform)
 }
 #endif
 
+
+void ACameraRail::BecomeViewTarget(APlayerController* PC)
+{
+    // ==================================================================================
+    // BecomeViewTarget
+    // Called when this actor becomes the active camera view target for a PlayerController.
+    // Marks the rail as active which enables position/rotation updates while ticking.
+    // ==================================================================================
+    Super::BecomeViewTarget(PC);
+
+    bIsActiveViewTarget = true;
+
+    UE_LOG(LogTemp, Log, TEXT("CameraRail [%s]: Became active view target"), *GetName());
+}
+
+void ACameraRail::EndViewTarget(APlayerController* PC)
+{
+    // ==================================================================================
+    // EndViewTarget
+    // Called when this actor is no longer the active view target.
+    // Clears the active flag so updates and shakes are disabled until reactivated.
+    // ==================================================================================
+    Super::EndViewTarget(PC);
+
+    bIsActiveViewTarget = false;
+
+    UE_LOG(LogTemp, Log, TEXT("CameraRail [%s]: No longer view target"), *GetName());
+}
+
 void ACameraRail::UpdateCameraPosition(float DeltaTime)
 {
+    // ==================================================================================
+    // UpdateCameraPosition
+    // Moves the current camera position along the spline toward the target position.
+    // Supports several smoothing modes (instant, lerp, damping), optional speed
+    // limiting (normalized to spline length), looping, and clamps to rail bounds.
+    // After computing the normalized position, it converts to world-space location
+    // applying the configured offset and enforces minimum distance constraints when
+    // required. Finally broadcasts the position change event.
+    // ==================================================================================
     if (!SplineComponent || !CameraComponent)
         return;
 
@@ -244,6 +294,13 @@ void ACameraRail::UpdateCameraPosition(float DeltaTime)
 
 void ACameraRail::UpdateCameraRotation(float DeltaTime)
 {
+    // ==================================================================================
+    // UpdateCameraRotation
+    // Smoothly rotates the cine camera to look at the player reference. Uses either the
+    // independent rotation smoothing speed or the main lerp speed depending on
+    // configuration and whether the player is moving. Rotation offsets and axis locks
+    // / constraints are applied via CalculateDesiredCameraRotation().
+    // ==================================================================================
     if (!CameraComponent || !PlayerReference || !IsValid(PlayerReference))
         return;
 
@@ -271,6 +328,12 @@ void ACameraRail::UpdateCameraRotation(float DeltaTime)
 
 FRotator ACameraRail::CalculateDesiredCameraRotation() const
 {
+    // ==================================================================================
+    // CalculateDesiredCameraRotation
+    // Computes the desired world rotation for the camera so it faces the player.
+    // Applies configured pitch/yaw/roll locks and constrains pitch/yaw to ranges if
+    // enabled. Adds any manual rotation offset before returning the target rotation.
+    // ==================================================================================
     if (!CameraComponent || !PlayerReference || !IsValid(PlayerReference))
         return CameraComponent ? CameraComponent->GetComponentRotation() : FRotator::ZeroRotator;
 
@@ -310,11 +373,22 @@ FRotator ACameraRail::CalculateDesiredCameraRotation() const
 
 bool ACameraRail::IsPlayerStopped() const
 {
+    // ==================================================================================
+    // IsPlayerStopped
+    // Utility that returns true when the recorded player speed is below the
+    // configured threshold used to switch rotation smoothing behavior.
+    // ==================================================================================
     return ShakeState.CurrentPlayerSpeed < PlayerStoppedThreshold;
 }
 
 void ACameraRail::CheckViewTargetStatus()
 {
+    // ==================================================================================
+    // CheckViewTargetStatus
+    // Verifies whether this rail is currently the PlayerController's view target and
+    // auto-activates or deactivates itself based on configuration. Also stops shakes
+    // when auto-deactivating.
+    // ==================================================================================
     UWorld* World = GetWorld();
     if (!World)
         return;
@@ -326,24 +400,31 @@ void ACameraRail::CheckViewTargetStatus()
     AActor* CurrentViewTarget = PC->GetViewTarget();
     bool bShouldBeActive = (CurrentViewTarget == this);
 
-    if (bShouldBeActive != bIsActiveViewTarget)
+    //Nothing to do if state has not changed
+    if (bShouldBeActive == bIsActiveViewTarget)
+        return;
+
+    bIsActiveViewTarget = bShouldBeActive;
+
+    if (!bIsActiveViewTarget)
     {
-        if (!bShouldBeActive && bIsActiveViewTarget)
-        {
-            UE_LOG(LogTemp, Log, TEXT("CameraRail [%s]: Auto-deactivating (no longer view target)"), *GetName());
-            bIsActiveViewTarget = false;
-            StopAllShakes(true);
-        }
-        else if (bShouldBeActive && !bIsActiveViewTarget)
-        {
-            UE_LOG(LogTemp, Log, TEXT("CameraRail [%s]: Auto-activating (became view target)"), *GetName());
-            bIsActiveViewTarget = true;
-        }
+        UE_LOG(LogTemp, Log, TEXT("CameraRail [%s]: Auto-deactivating (no longer view target)"), *GetName());
+        StopAllShakes(true);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Log, TEXT("CameraRail [%s]: Auto-activating (became view target)"), *GetName());
     }
 }
 
 void ACameraRail::HandlePlayerFollowing(float DeltaTime)
 {
+    // ==================================================================================
+    // HandlePlayerFollowing
+    // Update TargetPosition along the spline when the player has moved beyond a small
+    // threshold. Converts closest spline input to a normalized position and applies
+    // the spline-distance constraint if enabled.
+    // ==================================================================================
     if (!PlayerReference || !SplineComponent)
         return;
 
@@ -389,6 +470,13 @@ void ACameraRail::HandlePlayerFollowing(float DeltaTime)
 
 void ACameraRail::ApplySplineDistanceConstraint(float& InOutTargetPosition, const FVector& PlayerLocation)
 {
+    // ==================================================================================
+    // ApplySplineDistanceConstraint
+    // Ensures the camera's target position on the spline stays at least
+    // MinimumDistanceToPlayer away from the player by nudging the target toward a
+    // position that satisfies the minimum distance, blending the correction by
+    // SplineDistanceCorrectionSpeed.
+    // ==================================================================================
     if (!SplineComponent)
         return;
 
@@ -414,6 +502,12 @@ void ACameraRail::ApplySplineDistanceConstraint(float& InOutTargetPosition, cons
 
 void ACameraRail::ApplyOffsetDistanceConstraint(FVector& InOutCameraLocation, const FVector& PlayerLocation, const FRotator& SplineRotation)
 {
+    // ==================================================================================
+    // ApplyOffsetDistanceConstraint
+    // Enforces XY-only min/max distances between camera (with offset) and player.
+    // Computes required local offset adjustments (respecting bUseOffsetX/Y) and
+    // applies them while preserving Z (altitude).
+    // ==================================================================================
     FVector SplinePoint = InOutCameraLocation - SplineRotation.RotateVector(CameraOffset);
 
     FVector SplineToPlayer = PlayerLocation - SplinePoint;
@@ -450,6 +544,11 @@ void ACameraRail::ApplyOffsetDistanceConstraint(FVector& InOutCameraLocation, co
 
 void ACameraRail::DrawDebugInfo()
 {
+    // ==================================================================================
+    // DrawDebugInfo
+    // Visual debugging helpers: draws camera position, forward vector, player link
+    // and distance circles used by the offset/spline minimum distance systems.
+    // ==================================================================================
     UWorld* World = GetWorld();
     if (!World || !SplineComponent)
         return;
@@ -498,6 +597,10 @@ void ACameraRail::DrawDebugInfo()
 
 float ACameraRail::GetSpeedMultiplierAtPosition(float Position) const
 {
+    // ==================================================================================
+    // GetSpeedMultiplierAtPosition
+    // Returns a multiplier from the optional SpeedCurve; defaults to 1.0 if none.
+    // ==================================================================================
     if (SpeedCurve)
     {
         return SpeedCurve->GetFloatValue(Position);
@@ -507,6 +610,12 @@ float ACameraRail::GetSpeedMultiplierAtPosition(float Position) const
 
 void ACameraRail::FindAndSetPlayer()
 {
+    // ==================================================================================
+    // FindAndSetPlayer
+    // Periodic timer callback that attempts to locate the player pawn from the
+    // world's first player controller. Stops the search after MaxPlayerSearchAttempts
+    // and logs a warning so the user can manually set the reference if needed.
+    // ==================================================================================
     if (PlayerReference && IsValid(PlayerReference))
     {
         UWorld* World = GetWorld();
@@ -613,6 +722,12 @@ void ACameraRail::SetFocusTrackingEnabled(bool bEnabled)
 
 void ACameraRail::UpdateCameraShake(float DeltaTime)
 {
+    // ==================================================================================
+    // UpdateCameraShake
+    // Manages movement/idle camera shakes based on player speed and config flags.
+    // Starts/stops appropriate shake instances on the PlayerCameraManager and
+    // scales movement shake by speed when configured.
+    // ==================================================================================
     if (!bEnableCameraShake)
     {
         StopAllShakes(true);
@@ -681,6 +796,11 @@ void ACameraRail::UpdateCameraShake(float DeltaTime)
 
 float ACameraRail::CalculatePlayerSpeed(float DeltaTime)
 {
+    // ==================================================================================
+    // CalculatePlayerSpeed
+    // Returns player's instantaneous speed computed from last stored location and
+    // updates ShakeState.LastPlayerLocation for the next sample.
+    // ==================================================================================
     if (!PlayerReference || !IsValid(PlayerReference) || DeltaTime <= 0.0f)
         return 0.0f;
 
@@ -693,6 +813,11 @@ float ACameraRail::CalculatePlayerSpeed(float DeltaTime)
 
 void ACameraRail::StartMovementShake(float Intensity)
 {
+    // ==================================================================================
+    // StartMovementShake
+    // Requests a camera shake instance from the PlayerCameraManager for movement
+    // if one is not already active. Intensity scales the shake.
+    // ==================================================================================
     if (!CameraShakeClass)
         return;
 
@@ -714,6 +839,11 @@ void ACameraRail::StartMovementShake(float Intensity)
 
 void ACameraRail::StartIdleShake()
 {
+    // ==================================================================================
+    // StartIdleShake
+    // Requests the idle shake instance from the PlayerCameraManager when enabled
+    // and no movement shake is playing.
+    // ==================================================================================
     if (!IdleShakeClass)
         return;
 
@@ -735,6 +865,10 @@ void ACameraRail::StartIdleShake()
 
 void ACameraRail::StopMovementShake(bool bImmediate)
 {
+    // ==================================================================================
+    // StopMovementShake
+    // Stops the active movement shake instance (if any) via PlayerCameraManager.
+    // ==================================================================================
     if (!ShakeState.ActiveMovementShake)
         return;
 
@@ -753,6 +887,10 @@ void ACameraRail::StopMovementShake(bool bImmediate)
 
 void ACameraRail::StopIdleShake(bool bImmediate)
 {
+    // ==================================================================================
+    // StopIdleShake
+    // Stops the active idle shake instance (if any) via PlayerCameraManager.
+    // ==================================================================================
     if (!ShakeState.ActiveIdleShake)
         return;
 
@@ -771,6 +909,10 @@ void ACameraRail::StopIdleShake(bool bImmediate)
 
 void ACameraRail::StopAllShakes(bool bImmediate)
 {
+    // ==================================================================================
+    // StopAllShakes
+    // Convenience wrapper that stops both movement and idle shakes.
+    // ==================================================================================
     StopMovementShake(bImmediate);
     StopIdleShake(bImmediate);
 }
@@ -781,6 +923,11 @@ void ACameraRail::StopAllShakes(bool bImmediate)
 
 void ACameraRail::SetRailPosition(float Position, bool bTeleport)
 {
+    // ==================================================================================
+    // SetRailPosition
+    // Public API to move the rail's target (and optionally current) normalized
+    // position. Teleport applies the position immediately without smoothing.
+    // ==================================================================================
     TargetPosition = FMath::Clamp(Position, 0.0f, 1.0f);
 
     if (bTeleport)
@@ -792,6 +939,11 @@ void ACameraRail::SetRailPosition(float Position, bool bTeleport)
 
 void ACameraRail::SetPlayerReference(AActor* NewPlayer)
 {
+    // ==================================================================================
+    // SetPlayerReference
+    // Assigns the actor to follow/track. Initializes internal tracking state and
+    // optionally primes camera shake state. Logs on invalid assignment.
+    // ==================================================================================
     if (NewPlayer && IsValid(NewPlayer))
     {
         PlayerReference = NewPlayer;
@@ -818,11 +970,19 @@ void ACameraRail::SetPlayerReference(AActor* NewPlayer)
 
 float ACameraRail::GetRailLength() const
 {
+    // ==================================================================================
+    // GetRailLength
+    // Utility that returns the spline length or 0 if invalid.
+    // ==================================================================================
     return SplineComponent ? SplineComponent->GetSplineLength() : 0.0f;
 }
 
 FVector ACameraRail::GetLocationAtPosition(float Position) const
 {
+    // ==================================================================================
+    // GetLocationAtPosition
+    // Converts a normalized position [0,1] to world location along the spline.
+    // ==================================================================================
     if (!SplineComponent)
         return FVector::ZeroVector;
 
@@ -832,6 +992,10 @@ FVector ACameraRail::GetLocationAtPosition(float Position) const
 
 FRotator ACameraRail::GetRotationAtPosition(float Position) const
 {
+    // ==================================================================================
+    // GetRotationAtPosition
+    // Converts a normalized position [0,1] to world rotation along the spline.
+    // ==================================================================================
     if (!SplineComponent)
         return FRotator::ZeroRotator;
 
@@ -841,6 +1005,11 @@ FRotator ACameraRail::GetRotationAtPosition(float Position) const
 
 float ACameraRail::FindClosestPositionToLocation(const FVector& WorldLocation) const
 {
+    // ==================================================================================
+    // FindClosestPositionToLocation
+    // Finds the normalized spline position closest to a world location. Uses spline
+    // input keys normalized by the number of spline segments.
+    // ==================================================================================
     if (!SplineComponent)
         return 0.0f;
 
@@ -852,6 +1021,11 @@ float ACameraRail::FindClosestPositionToLocation(const FVector& WorldLocation) c
 
 void ACameraRail::ActivateCamera()
 {
+    // ==================================================================================
+    // ActivateCamera
+    // Sets this actor as the PlayerController's view target, activating rail updates
+    // and camera behavior. Validates core components and logs failures.
+    // ==================================================================================
     if (!CameraComponent || !IsValid(CameraComponent))
     {
         UE_LOG(LogTemp, Error, TEXT("CameraRail [%s]: Cannot activate - CameraComponent invalid"), *GetName());
@@ -879,6 +1053,10 @@ void ACameraRail::ActivateCamera()
 
 void ACameraRail::DeactivateCamera()
 {
+    // ==================================================================================
+    // DeactivateCamera
+    // Restores the player's pawn as view target if available.
+    // ==================================================================================
     UWorld* World = GetWorld();
     if (!World)
         return;

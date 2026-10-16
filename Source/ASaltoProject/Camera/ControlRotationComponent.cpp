@@ -14,6 +14,11 @@ UControlRotationComponent::UControlRotationComponent()
 void UControlRotationComponent::BeginPlay()
 {
     Super::BeginPlay();
+    // ==================================================================================
+    // BeginPlay
+    // Cache the owning PlayerController and the initial view target.
+    // Optionally output debug info when bShowDebugInfo is enabled.
+    // ==================================================================================
 
     OwnerPC = Cast<APlayerController>(GetOwner());
 
@@ -42,6 +47,10 @@ void UControlRotationComponent::BeginPlay()
 void UControlRotationComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    // ==================================================================================
+    // TickComponent
+    // Detects view target changes and updates control rotation alignment.
+    // ==================================================================================
 
     if (!bEnableControlRotationAlignment || !OwnerPC)
         return;
@@ -65,6 +74,14 @@ void UControlRotationComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 void UControlRotationComponent::OnViewTargetChanged()
 {
+    // ==================================================================================
+    // OnViewTargetChanged
+    // Called when the PlayerController's view target changes. If no camera blend
+    // is active, immediately align the control rotation to the new camera's
+    // forward direction (yaw only). If a blend is active, synchronization will
+    // happen over time via NotifyCameraBlend.
+    // ==================================================================================
+
     if (!OwnerPC)
         return;
 
@@ -111,6 +128,13 @@ void UControlRotationComponent::OnViewTargetChanged()
 
 void UControlRotationComponent::NotifyCameraBlend(float InBlendDuration)
 {
+    // ==================================================================================
+    // NotifyCameraBlend
+    // Called when a camera blend/transition starts. If the provided duration is
+    // <= 0, perform an immediate alignment. Otherwise initiate a timed
+    // synchronization that will interpolate control rotation over the duration.
+    // ==================================================================================
+
     if (!OwnerPC || !bEnableControlRotationAlignment)
         return;
 
@@ -139,13 +163,23 @@ void UControlRotationComponent::NotifyCameraBlend(float InBlendDuration)
 
 float UControlRotationComponent::EstimateBlendDuration() const
 {
-    // This function is no longer needed with the Blueprint notification system
-    // Kept for compatibility
+    // ==================================================================================
+    // EstimateBlendDuration
+    // Legacy placeholder kept for compatibility. Blueprints now notify blends
+    // directly, so this returns a default value.
+    // ==================================================================================
+
     return 1.0f;
 }
 
 void UControlRotationComponent::StartBlendSync(float Duration)
 {
+    // ==================================================================================
+    // StartBlendSync
+    // Initialize blend synchronization state. Record start time, duration, and
+    // the start/target rotations used for interpolation during UpdateControlRotation.
+    // ==================================================================================
+
     if (!OwnerPC)
         return;
 
@@ -176,6 +210,14 @@ void UControlRotationComponent::StartBlendSync(float Duration)
 
 void UControlRotationComponent::UpdateControlRotation(float DeltaTime)
 {
+    // ==================================================================================
+    // UpdateControlRotation
+    // Interpolate the PlayerController's control rotation during an active
+    // camera blend according to the same easing curve used by the camera
+    // system. When not blending, keep control rotation aligned to the
+    // view target camera's forward direction (yaw only).
+    // ==================================================================================
+
     if (!OwnerPC)
         return;
 

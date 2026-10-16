@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Interactable.h"
+#include "EAllowedInteractor.h"
 #include "InteractableBase.generated.h"
 
 // Delegate for when interaction completes
@@ -12,6 +13,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnInteracted, AInteractableBase*, 
 
 class UStaticMeshComponent;
 class ACharacter;
+class UInteractionFeedbackComponent;
 
 /**
  * Minimal base class for all interactable objects in The Operator
@@ -39,17 +41,21 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<ACharacter> CurrentlyFocusingCharacter = nullptr;
 
-	/** Cached outline material loaded from settings */
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInterface> CachedOutlineMaterial = nullptr;
+	/** Feedback toolbox (prompt widget + highlight). Its functions are called from this object's Blueprint. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UInteractionFeedbackComponent> FeedbackComponent;
 
 public:
 	/** Broadcast when this interactable is successfully interacted with */
 	UPROPERTY(BlueprintAssignable, Category = "Interaction")
 	FOnInteracted OnInteracted;
 
+	/** Which interactors can use this: everyone or a single role. Compared against the interactor's UInteractionComponent role. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
+	EAllowedInteractor AllowedInteractor = EAllowedInteractor::All;
+
 public:
-	AInteractableBase();
+	AInteractableBase(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 protected:
 	virtual void BeginPlay() override;
@@ -60,6 +66,24 @@ protected:
 	virtual void BeginFocus_Implementation(ACharacter* Character, UPrimitiveComponent* FocusedComponent) override;
 	virtual void EndFocus_Implementation(ACharacter* Character, UPrimitiveComponent* FocusedComponent) override;
 	virtual bool CanInteract_Implementation(ACharacter* Character) const override;
+	virtual void BeginRange_Implementation(ACharacter* Character) override;
+	virtual void EndRange_Implementation(ACharacter* Character) override;
+
+	/** This object entered Character's interaction range. Decide here what to show (e.g. FeedbackComponent->ShowWidget). */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction|Feedback")
+	void OnRangeEntered(ACharacter* Character);
+
+	/** This object left Character's interaction range. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction|Feedback")
+	void OnRangeExited(ACharacter* Character);
+
+	/** Character is now focusing this object; FocusedComponent is the primitive that was aimed at. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction|Feedback")
+	void OnFocusGained(ACharacter* Character, UPrimitiveComponent* FocusedComponent);
+
+	/** Character stopped focusing this object. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Interaction|Feedback")
+	void OnFocusLost(ACharacter* Character);
 
 	/** Updates the visual feedback based on current focus state */
 	UFUNCTION(BlueprintCallable, Category = "Interaction|Feedback")
@@ -72,8 +96,15 @@ public:
 	/** Returns the interactable mesh */
 	UStaticMeshComponent* GetInteractableMesh() const { return BaseMesh; }
 
+	/** Returns the feedback toolbox (prompt widget + highlight) */
+	UFUNCTION(BlueprintPure, Category = "Interaction|Feedback")
+	UInteractionFeedbackComponent* GetFeedbackComponent() const { return FeedbackComponent; }
+
 	/** Returns whether this interactable is currently focused */
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	bool IsFocused() const { return bIsFocused; }
 
+	/** True if AllowedInteractor accepts this character. Used by CanInteract and by the focus selection. */
+	UFUNCTION(BlueprintPure, Category = "Interaction")
+	bool IsInteractorAllowed(const ACharacter* Character) const;
 };

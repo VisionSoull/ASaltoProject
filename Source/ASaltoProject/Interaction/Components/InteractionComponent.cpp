@@ -63,6 +63,15 @@ void UInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		IInteractable::Execute_EndFocus(CurrentInteractable.GetObject(), OwnerCharacter, CurrentHitComponent);
 	}
 
+	for (const TScriptInterface<IInteractable>& Interactable : NearbyInteractables)
+	{
+		if (IsValid(Interactable.GetObject()))
+		{
+			IInteractable::Execute_EndRange(Interactable.GetObject(), OwnerCharacter);
+		}
+	}
+	NearbyInteractables.Empty();
+
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -77,11 +86,20 @@ void UInteractionComponent::OnInteractionZoneBeginOverlap(UPrimitiveComponent* O
 
 	if (OtherActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
 	{
+		// An actor with several overlapping primitives must only enter range once
+		const bool bAlreadyInRange = NearbyInteractables.ContainsByPredicate(
+			[OtherActor](const TScriptInterface<IInteractable>& Existing) { return Existing.GetObject() == OtherActor; });
+		if (bAlreadyInRange)
+		{
+			return;
+		}
+
 		TScriptInterface<IInteractable> Interactable;
 		Interactable.SetObject(OtherActor);
 		Interactable.SetInterface(Cast<IInteractable>(OtherActor));
 
 		NearbyInteractables.Add(Interactable);
+		IInteractable::Execute_BeginRange(OtherActor, OwnerCharacter);
 
 		if (NearbyInteractables.Num() == 1)
 		{
@@ -101,10 +119,15 @@ void UInteractionComponent::OnInteractionZoneEndOverlap(UPrimitiveComponent* Ove
 		return;
 	}
 
-	NearbyInteractables.RemoveAll([OtherActor](const TScriptInterface<IInteractable>& Interactable)
+	const int32 RemovedCount = NearbyInteractables.RemoveAll([OtherActor](const TScriptInterface<IInteractable>& Interactable)
 		{
 			return Interactable.GetObject() == OtherActor;
 		});
+
+	if (RemovedCount > 0)
+	{
+		IInteractable::Execute_EndRange(OtherActor, OwnerCharacter);
+	}
 
 	if (CurrentInteractable.GetObject() == OtherActor)
 	{
@@ -120,6 +143,12 @@ void UInteractionComponent::OnInteractionZoneEndOverlap(UPrimitiveComponent* Ove
 // Timer body: score every candidate, keep the best one that has line of sight, and update the focus.
 void UInteractionComponent::CheckAimedInteractable()
 {
+	// Holding something: keep focus on it so EndInteract reaches the right object
+	if (bFocusLocked)
+	{
+		return;
+	}
+
 	if (NearbyInteractables.Num() == 0)
 	{
 		UpdateCurrentInteractable(TScriptInterface<IInteractable>(), nullptr);
@@ -147,6 +176,17 @@ void UInteractionComponent::CheckAimedInteractable()
 		AActor* CandidateActor = Cast<AActor>(Candidate.GetObject());
 		if (!CandidateActor)
 		{
+			continue;
+		}
+
+		// Role gate: objects this character is not allowed to use never get focus
+		const AInteractableBase* CandidateBase = Cast<AInteractableBase>(CandidateActor);
+		if (CandidateBase && !CandidateBase->IsInteractorAllowed(OwnerCharacter))
+		{
+			if (bDebugDraw)
+			{
+				DrawDebugLine(GetWorld(), Origin, CandidateActor->GetActorLocation(), FColor(80, 80, 80), false, DebugLife, 0, 1.0f);
+			}
 			continue;
 		}
 

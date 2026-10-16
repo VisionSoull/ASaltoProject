@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "../Interactables/EAllowedInteractor.h"
 #include "InteractionComponent.generated.h"
 
 class IInteractable;
@@ -125,8 +126,22 @@ protected:
 	/** Repeating timer that runs CheckAimedInteractable. This component never uses Tick. */
 	FTimerHandle InteractionCheckTimer;
 
+	/** Set by SetFocusLocked. While true CheckAimedInteractable keeps the current focus. */
+	bool bFocusLocked = false;
+
 public:
 	UInteractionComponent();
+
+	/** Who this interactor is. Interactables use it to accept or refuse the interaction (see EAllowedInteractor). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
+	EInteractorRole InteractorRole = EInteractorRole::None;
+
+	/** While locked the focus stays on the current object (e.g. while holding a movable), so release reaches it. */
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	void SetFocusLocked(bool bLocked) { bFocusLocked = bLocked; }
+
+	UFUNCTION(BlueprintPure, Category = "Interaction")
+	bool IsFocusLocked() const { return bFocusLocked; }
 
 	/** Call on interact press. Runs BeginInteract on the focused object (server directly, client through the server RPC). */
 	void DoInteractPressed();

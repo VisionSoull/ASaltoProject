@@ -42,7 +42,8 @@ public class ASaltoProject : ModuleRules
 			});
 
 			PrivateDependencyModuleNames.AddRange(new string[] {
-				"EditorSubsystem"
+				"EditorSubsystem",
+				"UnrealEd"
 			});
 		}
 

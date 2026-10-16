@@ -69,4 +69,18 @@ public:
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
 	bool CanInteract(ACharacter* Character) const;
+
+	/**
+	 * Called when this object enters a character's interaction range (before any focus)
+	 * @param Character The character whose range this object entered
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	void BeginRange(ACharacter* Character);
+
+	/**
+	 * Called when this object leaves a character's interaction range
+	 * @param Character The character whose range this object left
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	void EndRange(ACharacter* Character);
 };
