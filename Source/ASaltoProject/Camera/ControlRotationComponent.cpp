@@ -3,6 +3,7 @@
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "Kismet/KismetMathLibrary.h"
 
 UControlRotationComponent::UControlRotationComponent()
@@ -16,8 +17,9 @@ void UControlRotationComponent::BeginPlay()
     Super::BeginPlay();
     // ==================================================================================
     // BeginPlay
-    // Cache the owning PlayerController and the initial view target.
-    // Optionally output debug info when bShowDebugInfo is enabled.
+    // - Caches the owning PlayerController and initial view target
+    // - Initializes movement and camera rotation tracking state
+    // - Optionally outputs debug information
     // ==================================================================================
 
     OwnerPC = Cast<APlayerController>(GetOwner());
@@ -30,6 +32,18 @@ void UControlRotationComponent::BeginPlay()
     }
 
     LastViewTarget = OwnerPC->GetViewTarget();
+
+    if (APawn* ControlledPawn = OwnerPC->GetPawn())
+    {
+        LastMovementInputVector = ControlledPawn->GetLastMovementInputVector();
+        bHasLastMovementInput = true;
+    }
+
+    if (UCameraComponent* CameraComp = GetViewTargetCameraComponent())
+    {
+        LastCameraYaw = CameraComp->GetForwardVector().Rotation().Yaw;
+        bHasLastCameraYaw = true;
+    }
 
     if (bShowDebugInfo)
     {
@@ -49,7 +63,10 @@ void UControlRotationComponent::TickComponent(float DeltaTime, ELevelTick TickTy
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     // ==================================================================================
     // TickComponent
-    // Detects view target changes and updates control rotation alignment.
+    // - Detects view target and camera rotation changes
+    // - Tracks changes to the player's movement direction
+    // - Preserves movement direction while the camera rotates
+    // - Updates control rotation every other frame for performance
     // ==================================================================================
 
     if (!bEnableControlRotationAlignment || !OwnerPC)
@@ -68,18 +85,85 @@ void UControlRotationComponent::TickComponent(float DeltaTime, ELevelTick TickTy
         LastViewTarget = CurrentViewTarget;
     }
 
+    const bool bMovementDirectionChanged = HasMovementDirectionChanged();
+    if (bMovementDirectionChanged)
+    {
+        bPreserveMovementDirection = false;
+        bIsBlending = false;
+    }
+
+    if (UCameraComponent* CameraComp = GetViewTargetCameraComponent())
+    {
+        // Detect camera yaw changes independently of view target changes
+        const float CurrentCameraYaw = CameraComp->GetForwardVector().Rotation().Yaw;
+        if (bHasLastCameraYaw &&
+            FMath::Abs(FMath::FindDeltaAngleDegrees(LastCameraYaw, CurrentCameraYaw)) > 0.1f &&
+            !bMovementDirectionChanged &&
+            LastMovementInputVector.SizeSquared2D() > KINDA_SMALL_NUMBER)
+        {
+            bPreserveMovementDirection = true;
+            bIsBlending = false;
+        }
+
+        LastCameraYaw = CurrentCameraYaw;
+        bHasLastCameraYaw = true;
+    }
+
     // Update control rotation alignment
     UpdateControlRotation(DeltaTime);
+}
+
+bool UControlRotationComponent::HasMovementDirectionChanged()
+{
+    // ==================================================================================
+    // HasMovementDirectionChanged
+    // - Reads the last movement input consumed by the controlled pawn
+    // - Detects changes in direction or input magnitude
+    // - Stores the current vector for comparison on the next update
+    // ==================================================================================
+
+    if (!OwnerPC)
+        return false;
+
+    APawn* ControlledPawn = OwnerPC->GetPawn();
+    if (!ControlledPawn)
+        return false;
+
+    const FVector CurrentMovementInputVector = ControlledPawn->GetLastMovementInputVector();
+    const bool bChanged = !bHasLastMovementInput ||
+        !CurrentMovementInputVector.Equals(LastMovementInputVector, 0.01f);
+
+    LastMovementInputVector = CurrentMovementInputVector;
+    bHasLastMovementInput = true;
+    return bChanged;
+}
+
+void UControlRotationComponent::AlignControlRotationToCamera()
+{
+    // ==================================================================================
+    // AlignControlRotationToCamera
+    // - Gets the active camera forward direction
+    // - Removes pitch and roll so only the horizontal direction is used
+    // - Applies the resulting yaw to the PlayerController
+    // ==================================================================================
+
+    UCameraComponent* CameraComp = GetViewTargetCameraComponent();
+    if (!OwnerPC || !CameraComp)
+        return;
+
+    FRotator CameraForward = CameraComp->GetForwardVector().Rotation();
+    CameraForward.Pitch = 0.0f;
+    CameraForward.Roll = 0.0f;
+    OwnerPC->SetControlRotation(CameraForward);
 }
 
 void UControlRotationComponent::OnViewTargetChanged()
 {
     // ==================================================================================
     // OnViewTargetChanged
-    // Called when the PlayerController's view target changes. If no camera blend
-    // is active, immediately align the control rotation to the new camera's
-    // forward direction (yaw only). If a blend is active, synchronization will
-    // happen over time via NotifyCameraBlend.
+    // - Logs the previous and new view targets when debugging is enabled
+    // - Preserves the current movement direction while the player is moving
+    // - Aligns immediately when the player is not moving and no blend is active
     // ==================================================================================
 
     if (!OwnerPC)
@@ -95,22 +179,22 @@ void UControlRotationComponent::OnViewTargetChanged()
         UE_LOG(LogTemp, Warning, TEXT("  New View Target: %s"), NewViewTarget ? *NewViewTarget->GetName() : TEXT("NULL"));
     }
 
-    // If not currently blending (no blend was notified), snap immediately
-    if (!bIsBlending)
-    {
-        UCameraComponent* CameraComp = GetViewTargetCameraComponent();
-        if (CameraComp)
-        {
-            FRotator CameraForward = CameraComp->GetForwardVector().Rotation();
-            CameraForward.Pitch = 0.0f;
-            CameraForward.Roll = 0.0f;
-            OwnerPC->SetControlRotation(CameraForward);
+    const bool bHasMovementInput = LastMovementInputVector.SizeSquared2D() > KINDA_SMALL_NUMBER;
 
-            if (bShowDebugInfo)
-            {
-                UE_LOG(LogTemp, Log, TEXT("  No active blend - instant snap to: %s"), *CameraForward.ToString());
-            }
+    // Keep the current control rotation while the player is moving
+    // This prevents a camera change from changing the world direction of held movement input
+    if (bHasMovementInput)
+    {
+        bPreserveMovementDirection = true;
+
+        if (bShowDebugInfo)
+        {
+            UE_LOG(LogTemp, Log, TEXT("  Movement active - preserving current control direction"));
         }
+    }
+    else if (!bIsBlending)
+    {
+        AlignControlRotationToCamera();
     }
     else
     {
@@ -130,9 +214,10 @@ void UControlRotationComponent::NotifyCameraBlend(float InBlendDuration)
 {
     // ==================================================================================
     // NotifyCameraBlend
-    // Called when a camera blend/transition starts. If the provided duration is
-    // <= 0, perform an immediate alignment. Otherwise initiate a timed
-    // synchronization that will interpolate control rotation over the duration.
+    // - Receives camera blend notifications from Blueprint
+    // - Performs an immediate alignment for zero-length transitions
+    // - Starts timed synchronization for transitions with a duration
+    // - Preserves active movement direction during camera transitions
     // ==================================================================================
 
     if (!OwnerPC || !bEnableControlRotationAlignment)
@@ -140,15 +225,15 @@ void UControlRotationComponent::NotifyCameraBlend(float InBlendDuration)
 
     if (InBlendDuration <= 0.0f)
     {
-        // Instant transition
-        UCameraComponent* CameraComp = GetViewTargetCameraComponent();
-        if (CameraComp)
+        if (LastMovementInputVector.SizeSquared2D() > KINDA_SMALL_NUMBER)
         {
-            FRotator CameraForward = CameraComp->GetForwardVector().Rotation();
-            CameraForward.Pitch = 0.0f;
-            CameraForward.Roll = 0.0f;
-            OwnerPC->SetControlRotation(CameraForward);
+            bPreserveMovementDirection = true;
+            bIsBlending = false;
+            return;
         }
+
+        // Instant transition
+        AlignControlRotationToCamera();
         return;
     }
 
@@ -176,8 +261,9 @@ void UControlRotationComponent::StartBlendSync(float Duration)
 {
     // ==================================================================================
     // StartBlendSync
-    // Initialize blend synchronization state. Record start time, duration, and
-    // the start/target rotations used for interpolation during UpdateControlRotation.
+    // - Initializes blend timing and starting rotation state
+    // - Calculates the target yaw from the active camera
+    // - Skips synchronization when active movement direction must be preserved
     // ==================================================================================
 
     if (!OwnerPC)
@@ -192,7 +278,14 @@ void UControlRotationComponent::StartBlendSync(float Duration)
     BlendStartTime = GetWorld()->GetTimeSeconds();
     BlendStartRotation = OwnerPC->GetControlRotation();
 
-    // Target rotation from new camera's forward vector (yaw only)
+    if (LastMovementInputVector.SizeSquared2D() > KINDA_SMALL_NUMBER)
+    {
+        bPreserveMovementDirection = true;
+        bIsBlending = false;
+        return;
+    }
+
+    // Target rotation from the new camera's forward vector (yaw only)
     BlendTargetRotation = TargetCamera->GetForwardVector().Rotation();
     BlendTargetRotation.Pitch = 0.0f;
     BlendTargetRotation.Roll = 0.0f;
@@ -212,10 +305,9 @@ void UControlRotationComponent::UpdateControlRotation(float DeltaTime)
 {
     // ==================================================================================
     // UpdateControlRotation
-    // Interpolate the PlayerController's control rotation during an active
-    // camera blend according to the same easing curve used by the camera
-    // system. When not blending, keep control rotation aligned to the
-    // view target camera's forward direction (yaw only).
+    // - Preserves control rotation while movement direction is locked
+    // - Interpolates control rotation during an active camera blend
+    // - Aligns control rotation with the camera when no blend is active
     // ==================================================================================
 
     if (!OwnerPC)
@@ -224,6 +316,12 @@ void UControlRotationComponent::UpdateControlRotation(float DeltaTime)
     UCameraComponent* CameraComp = GetViewTargetCameraComponent();
     if (!CameraComp)
         return;
+
+    if (bPreserveMovementDirection)
+    {
+        bIsBlending = false;
+        return;
+    }
 
     if (bIsBlending)
     {
@@ -262,17 +360,22 @@ void UControlRotationComponent::UpdateControlRotation(float DeltaTime)
     }
     else
     {
-        // Not blending - maintain alignment with camera
-        FRotator CameraForward = CameraComp->GetForwardVector().Rotation();
-        CameraForward.Pitch = 0.0f;
-        CameraForward.Roll = 0.0f;
-
-        OwnerPC->SetControlRotation(CameraForward);
+        if (!bPreserveMovementDirection)
+        {
+            AlignControlRotationToCamera();
+        }
     }
 }
 
 UCameraComponent* UControlRotationComponent::GetViewTargetCameraComponent() const
 {
+    // ==================================================================================
+    // GetViewTargetCameraComponent
+    // - Gets the PlayerController's current view target
+    // - Finds and returns its camera component
+    // - Returns nullptr when no valid controller or view target exists
+    // ==================================================================================
+
     if (!OwnerPC)
         return nullptr;
 

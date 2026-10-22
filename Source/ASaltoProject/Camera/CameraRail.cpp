@@ -422,7 +422,8 @@ void ACameraRail::HandlePlayerFollowing(float DeltaTime)
     // ==================================================================================
     // HandlePlayerFollowing
     // Update TargetPosition along the spline when the player has moved beyond a small
-    // threshold. Converts closest spline input to a normalized position and applies
+    // threshold. Initializes from the global closest point once, then uses a local
+    // spline search to prevent switching to another nearby curve section. Applies
     // the spline-distance constraint if enabled.
     // ==================================================================================
     if (!PlayerReference || !SplineComponent)
@@ -450,8 +451,18 @@ void ACameraRail::HandlePlayerFollowing(float DeltaTime)
 
     LastPlayerLocation = PlayerLocation;
 
-    float ClosestInputKey = SplineComponent->FindInputKeyClosestToWorldLocation(PlayerLocation);
-    float ClosestDistance = SplineComponent->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
+    float ClosestDistance;
+    if (bHasFollowTargetPosition)
+    {
+        const float ClosestPosition = FindClosestPositionToLocationNear(PlayerLocation, TargetPosition);
+        ClosestDistance = ClosestPosition * GetRailLength();
+    }
+    else
+    {
+        const float ClosestInputKey = SplineComponent->FindInputKeyClosestToWorldLocation(PlayerLocation);
+        ClosestDistance = SplineComponent->GetDistanceAlongSplineAtSplineInputKey(ClosestInputKey);
+        bHasFollowTargetPosition = true;
+    }
 
     float RailLength = GetRailLength();
     if (RailLength > 0.0f)
@@ -475,7 +486,8 @@ void ACameraRail::ApplySplineDistanceConstraint(float& InOutTargetPosition, cons
     // Ensures the camera's target position on the spline stays at least
     // MinimumDistanceToPlayer away from the player by nudging the target toward a
     // position that satisfies the minimum distance, blending the correction by
-    // SplineDistanceCorrectionSpeed.
+    // SplineDistanceCorrectionSpeed. The correction search remains local to the
+    // current rail position so it cannot jump to another nearby spline section.
     // ==================================================================================
     if (!SplineComponent)
         return;
@@ -494,7 +506,7 @@ void ACameraRail::ApplySplineDistanceConstraint(float& InOutTargetPosition, cons
         FVector DirectionToPlayer = (PlayerLocation - SplinePointAtTarget).GetSafeNormal();
         FVector DesiredCameraLocation = PlayerLocation - (DirectionToPlayer * MinimumDistanceToPlayer);
 
-        float ClosestToDesired = FindClosestPositionToLocation(DesiredCameraLocation);
+        float ClosestToDesired = FindClosestPositionToLocationNear(DesiredCameraLocation, InOutTargetPosition);
 
         InOutTargetPosition = FMath::Lerp(InOutTargetPosition, ClosestToDesired, CorrectionAlpha);
     }
@@ -1017,6 +1029,52 @@ float ACameraRail::FindClosestPositionToLocation(const FVector& WorldLocation) c
     float NumberOfPoints = SplineComponent->GetNumberOfSplinePoints() - 1;
 
     return NumberOfPoints > 0 ? ClosestInputKey / NumberOfPoints : 0.0f;
+}
+
+float ACameraRail::FindClosestPositionToLocationNear(const FVector& WorldLocation, float CenterPosition) const
+{
+    // ==================================================================================
+    // FindClosestPositionToLocationNear
+    // Searches a limited normalized range around the current rail position instead of
+    // querying the entire spline. This prevents the camera from switching to another
+    // nearby section when a curved spline passes close to itself.
+    // ==================================================================================
+    if (!SplineComponent || LocalClosestSearchSamples <= 0)
+        return FMath::Clamp(CenterPosition, 0.0f, 1.0f);
+
+    const bool bIsClosedLoop = SplineComponent->IsClosedLoop();
+    float BestPosition = FMath::Clamp(CenterPosition, 0.0f, 1.0f);
+    float BestDistanceSquared = TNumericLimits<float>::Max();
+
+    for (int32 SampleIndex = 0; SampleIndex <= LocalClosestSearchSamples; ++SampleIndex)
+    {
+        const float Alpha = static_cast<float>(SampleIndex) / LocalClosestSearchSamples;
+        float CandidatePosition = CenterPosition +
+            FMath::Lerp(-LocalClosestSearchRange, LocalClosestSearchRange, Alpha);
+
+        if (bIsClosedLoop)
+        {
+            CandidatePosition = FMath::Fmod(CandidatePosition, 1.0f);
+            if (CandidatePosition < 0.0f)
+            {
+                CandidatePosition += 1.0f;
+            }
+        }
+        else
+        {
+            CandidatePosition = FMath::Clamp(CandidatePosition, 0.0f, 1.0f);
+        }
+
+        const FVector CandidateLocation = GetLocationAtPosition(CandidatePosition);
+        const float DistanceSquared = FVector::DistSquared(CandidateLocation, WorldLocation);
+        if (DistanceSquared < BestDistanceSquared)
+        {
+            BestDistanceSquared = DistanceSquared;
+            BestPosition = CandidatePosition;
+        }
+    }
+
+    return BestPosition;
 }
 
 void ACameraRail::ActivateCamera()

@@ -49,6 +49,13 @@ private:
     AActor* LastViewTarget = nullptr;
     bool bFrameToggle = false;
 
+    // Movement direction state used to keep the world direction stable while the camera rotates
+    FVector LastMovementInputVector = FVector::ZeroVector;
+    bool bHasLastMovementInput = false;
+    bool bPreserveMovementDirection = false;
+    float LastCameraYaw = 0.0f;
+    bool bHasLastCameraYaw = false;
+
     // Blend synchronization state
     bool bIsBlending = false;
     float BlendStartTime = 0.0f;
@@ -61,6 +68,8 @@ private:
     // ==================================================================================
 
     void UpdateControlRotation(float DeltaTime);
+    bool HasMovementDirectionChanged();
+    void AlignControlRotationToCamera();
     void OnViewTargetChanged();
     
     UCameraComponent* GetViewTargetCameraComponent() const;

@@ -310,6 +310,8 @@ private:
     static constexpr float DebugPlayerSphereRadius = 30.0f;
     static constexpr float DebugDirectionArrowLength = 200.0f;
     static constexpr float DebugMinDistanceSphereRadius = 25.0f;
+    static constexpr float LocalClosestSearchRange = 0.15f;
+    static constexpr int32 LocalClosestSearchSamples = 32;
 
     // ==================================================================================
     // INTERNAL STATE
@@ -321,6 +323,7 @@ private:
 
     FVector LastPlayerLocation = FVector::ZeroVector;
     bool bPlayerLocationInitialized = false;
+    bool bHasFollowTargetPosition = false;
 
     FTimerHandle PlayerSearchTimer;
     int32 PlayerSearchAttempts = 0;
@@ -434,4 +437,5 @@ private:
 
     void ApplySplineDistanceConstraint(float& InOutTargetPosition, const FVector& PlayerLocation);
     void ApplyOffsetDistanceConstraint(FVector& InOutCameraLocation, const FVector& PlayerLocation, const FRotator& SplineRotation);
+    float FindClosestPositionToLocationNear(const FVector& WorldLocation, float CenterPosition) const;
 };
