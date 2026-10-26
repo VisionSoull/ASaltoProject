@@ -120,6 +120,7 @@ private:
     float LastStress;
     EEmotionalState LastEmotionalState;
     FTimerHandle EvaluationTimer;
+    bool bPanicEnabled = true;
 
 public:
     // Events
@@ -153,6 +154,13 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Emotional State")
     bool IsInPanicState() const { return bPanicLatched; }
+
+    // Turns the panic system on or off
+    UFUNCTION(BlueprintCallable, Category = "Emotional State")
+    void SetPanicEnabled(bool bEnabled);
+
+    UFUNCTION(BlueprintCallable, Category = "Emotional State")
+    bool IsPanicEnabled() const { return bPanicEnabled; }
 
 protected:
     float GetCurrentTime() const;

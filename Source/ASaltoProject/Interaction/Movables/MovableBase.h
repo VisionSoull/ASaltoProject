@@ -5,13 +5,13 @@
 #include "CoreMinimal.h"
 #include "../Interactables/InteractableBase.h"
 #include "Movable.h"
-#include "MovableTypes.h"
+#include "EMovableTypes.h"
 #include "MovableBase.generated.h"
 
-class UPhysicsHandleComponent;
 class UPushPullAnchorComponent;
 class UPushPullComponent;
 class AMovableBase;
+class UHandGripComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMovableLockChanged, AMovableBase*, Movable);
 
@@ -61,9 +61,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable")
 	EMoveConstraint MoveConstraint = EMoveConstraint::SingleAxis;
 
-	/** Drag speed in cm/s (GDD: Large 100, Medium 150, Small 200). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movable", meta = (ClampMin = 0.0, ForceUnits = "cm/s"))
+	/** Top drag speed in cm/s (GDD: Large 100, Medium 150, Small 200). */	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movable", meta = (ClampMin = 0.0, ForceUnits = "cm/s"))
 	float DragSpeed = 150.f;
+
+	/** How hard the movers push, as an acceleration in cm/s^2. Must beat floor friction (about 700 on a default material) and, on a ramp, gravity. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable", meta = (ClampMin = 0.0))
+	float PushAcceleration = 1500.f;
+
+	/** How quickly the object reaches its drag speed (per second). Lower = smoother start and no speed wobble. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable", meta = (ClampMin = 0.1))
+	float PushResponse = 8.f;
+
+	/** Height above the object's lowest point where the push is applied, in cm. Low = it slides up ramps; high = it tips over. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable", meta = (ClampMin = 0.0, Units = "cm"))
+	float PushHeight = 5.f;
+
+	/** Below this speed (cm/s) a released object counts as stopped and becomes solid again. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movable", meta = (ClampMin = 0.0, ForceUnits = "cm/s"))
+	float RestSpeed = 5.f;
 
 	/** Fired when the object gets locked (lock zone, Blueprint). */
 	UPROPERTY(BlueprintAssignable, Category = "Movable")
@@ -88,6 +103,9 @@ public:
 	/** True while at least one character holds this object. */
 	UFUNCTION(BlueprintPure, Category = "Movable")
 	bool IsHeld() const { return Movers.Num() > 0; }
+
+	/** Grips for hand IK. Under: the anchor pushed from, or null for the grips placed directly on the object (carrying). */
+	void FindHandGrips(const USceneComponent* Under, UHandGripComponent*& OutLeft, UHandGripComponent*& OutRight) const;
 
 protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -138,23 +156,21 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable")
 	bool bLocked = false;
 
-	/** Pulls the object towards the movers' target while dragged. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UPhysicsHandleComponent> DragHandle;
-
 private:
 	UPushPullComponent* FindMoverOf(const ACharacter* Character) const;
 	bool IsMover(const UPushPullComponent* Mover) const;
 	bool IsAnchorTaken(const UPushPullAnchorComponent* Anchor) const;
+	/** Objects that need several movers keep them on one face. True if Anchor is on the face already held, or nobody holds it. */
+	bool IsOnHeldFace(const UPushPullAnchorComponent* Anchor) const;
 	void ReleaseAllMovers();
 	void StartDrag();
 	void StopDrag();
+
+	/** Stops dragging once the object has slowed down to rest (friction does the braking). */
+	void StopDragWhenAtRest();
 
 	UPROPERTY(Transient)
 	TArray<FMovableMoverSlot> Movers;
 
 	bool bDragging = false;
-
-	/** Height kept while dragging (stays on the floor). */
-	float DragGroundZ = 0.f;
 };

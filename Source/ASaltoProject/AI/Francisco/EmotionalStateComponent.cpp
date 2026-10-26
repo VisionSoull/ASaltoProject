@@ -295,6 +295,12 @@ void UEmotionalStateComponent::SetSourceRate(EStressSource Source, float NewRate
 // Pick the rate for a zone
 void UEmotionalStateComponent::ApplyZoneRate(EProximityZone Zone)
 {
+    if (!bPanicEnabled)
+    {
+        SetSourceRate(EStressSource::Distance, 0.0f);
+        return;
+    }
+
     float Rate = 0.0f;
 
     switch (Zone)
@@ -317,6 +323,8 @@ void UEmotionalStateComponent::ApplyZoneRate(EProximityZone Zone)
 
 void UEmotionalStateComponent::AddStress(float Amount, EStressSource Source)
 {
+    if (!bPanicEnabled) return;
+
     if (FStressSourceData* Data = StressSources.Find(Source))
     {
         const float Now = GetCurrentTime();
@@ -371,4 +379,28 @@ void UEmotionalStateComponent::DrawDebugInfo() const
         bPanicLatched ? TEXT("ON") : TEXT("off"));
 
     DrawDebugString(GetWorld(), Location, DebugText, nullptr, TextColor, 0.0f, true);
+}
+
+void UEmotionalStateComponent::SetPanicEnabled(bool bEnabled)
+{
+    if (bPanicEnabled == bEnabled) return;
+    bPanicEnabled = bEnabled;
+
+    if (!bPanicEnabled)
+    {
+        // Reset all stress
+        for (auto& Pair : StressSources)
+        {
+            Pair.Value.BaseStress = 0.0f;
+            Pair.Value.SegmentStartTime = GetCurrentTime();
+            Pair.Value.NetRate = 0.0f;
+        }
+    }
+    else if (ProximityComponent)
+    {
+        // Start again from the current zone
+        ApplyZoneRate(ProximityComponent->GetCurrentZone());
+    }
+
+    RefreshState();
 }

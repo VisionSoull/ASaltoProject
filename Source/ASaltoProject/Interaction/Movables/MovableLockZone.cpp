@@ -29,13 +29,22 @@ void AMovableLockZone::BeginPlay()
 	Super::BeginPlay();
 	LockArea->OnComponentBeginOverlap.AddDynamic(this, &AMovableLockZone::OnAreaBeginOverlap);
 	LockArea->OnComponentEndOverlap.AddDynamic(this, &AMovableLockZone::OnAreaEndOverlap);
+
+	// Overlap events only fire on entering: pick up movables that start inside the area
+	TArray<AActor*> OverlappingActors;
+	LockArea->GetOverlappingActors(OverlappingActors, AMovableBase::StaticClass());
+	for (AActor* Actor : OverlappingActors)
+	{
+		Candidates.AddUnique(Cast<AMovableBase>(Actor));
+	}
+	SetActorTickEnabled(Candidates.Num() > 0);
 }
 
 void AMovableLockZone::OnAreaBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 	int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	AMovableBase* Movable = Cast<AMovableBase>(OtherActor);
-	if (!Movable || (RequiredMovable && Movable != RequiredMovable) || LockedHere.Contains(Movable))
+	if (!Movable || LockedHere.Contains(Movable))
 	{
 		return;
 	}
@@ -76,8 +85,8 @@ void AMovableLockZone::Tick(float DeltaTime)
 			continue;
 		}
 
-		// Already locked by something else (puzzle, cutscene): leave it alone
-		if (IMovable::Execute_IsLocked(Movable))
+		// Not the movable this zone wants, or already locked by something else (puzzle, cutscene): leave it alone
+		if ((RequiredMovable && Movable != RequiredMovable) || IMovable::Execute_IsLocked(Movable))
 		{
 			continue;
 		}

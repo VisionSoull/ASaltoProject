@@ -26,7 +26,9 @@ public class ASaltoProject : ModuleRules
 			"DeveloperSettings",
 			// Animation
 			"MotionWarping",
-			"AnimGraphRuntime"
+			"AnimGraphRuntime",
+			// Procedural buildings
+			"PCG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

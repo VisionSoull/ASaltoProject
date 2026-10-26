@@ -32,6 +32,9 @@ void UInteractionComponent::BeginPlay()
 		return;
 	}
 
+	// InteractionRadius is only loaded after the constructor, so apply it here
+	InteractionZone->SetSphereRadius(InteractionRadius);
+
 	if (AActor* Owner = GetOwner())
 	{
 		InteractionZone->AttachToComponent(Owner->GetRootComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
@@ -48,6 +51,9 @@ void UInteractionComponent::BeginPlay()
 
 	InteractionZone->OnComponentBeginOverlap.AddDynamic(this, &UInteractionComponent::OnInteractionZoneBeginOverlap);
 	InteractionZone->OnComponentEndOverlap.AddDynamic(this, &UInteractionComponent::OnInteractionZoneEndOverlap);
+
+	// Anything already inside the sphere fired its BeginOverlap before the bindings above
+	AddCurrentOverlaps();
 }
 
 // Clears the timer and drops focus on the current object before the component goes away.
@@ -75,39 +81,70 @@ void UInteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-// A candidate entered the sphere: store it, and start the check timer if it is the first one.
+// A candidate entered the sphere.
 void UInteractionComponent::OnInteractionZoneBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	if (!OtherActor || OtherActor == GetOwner())
+	AddCandidate(OtherActor);
+}
+
+// Stores an interactable in range and starts the check timer if it is the first one.
+void UInteractionComponent::AddCandidate(AActor* Actor)
+{
+	if (!IsValid(Actor) || Actor == GetOwner() || !Actor->Implements<UInteractable>())
 	{
 		return;
 	}
 
-	if (OtherActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+	// An actor with several overlapping primitives must only enter range once
+	const bool bAlreadyInRange = NearbyInteractables.ContainsByPredicate(
+		[Actor](const TScriptInterface<IInteractable>& Existing) { return Existing.GetObject() == Actor; });
+	if (bAlreadyInRange)
 	{
-		// An actor with several overlapping primitives must only enter range once
-		const bool bAlreadyInRange = NearbyInteractables.ContainsByPredicate(
-			[OtherActor](const TScriptInterface<IInteractable>& Existing) { return Existing.GetObject() == OtherActor; });
-		if (bAlreadyInRange)
-		{
-			return;
-		}
-
-		TScriptInterface<IInteractable> Interactable;
-		Interactable.SetObject(OtherActor);
-		Interactable.SetInterface(Cast<IInteractable>(OtherActor));
-
-		NearbyInteractables.Add(Interactable);
-		IInteractable::Execute_BeginRange(OtherActor, OwnerCharacter);
-
-		if (NearbyInteractables.Num() == 1)
-		{
-			CurrentCheckRate = InteractionCheckInterval;
-			GetWorld()->GetTimerManager().SetTimer(InteractionCheckTimer, this, &UInteractionComponent::CheckAimedInteractable,
-				InteractionCheckInterval, true);
-		}
+		return;
 	}
+
+	TScriptInterface<IInteractable> Interactable;
+	Interactable.SetObject(Actor);
+	Interactable.SetInterface(Cast<IInteractable>(Actor));
+
+	NearbyInteractables.Add(Interactable);
+	IInteractable::Execute_BeginRange(Actor, OwnerCharacter);
+
+	if (NearbyInteractables.Num() == 1)
+	{
+		CurrentCheckRate = InteractionCheckInterval;
+		GetWorld()->GetTimerManager().SetTimer(InteractionCheckTimer, this, &UInteractionComponent::CheckAimedInteractable,
+			InteractionCheckInterval, true);
+	}
+}
+
+// Overlap events only fire on entering, so read what the sphere already overlaps.
+void UInteractionComponent::AddCurrentOverlaps()
+{
+	InteractionZone->UpdateOverlaps();
+
+	TArray<AActor*> OverlappingActors;
+	InteractionZone->GetOverlappingActors(OverlappingActors);
+	for (AActor* Actor : OverlappingActors)
+	{
+		AddCandidate(Actor);
+	}
+}
+
+// Resizes the interaction sphere at runtime.
+void UInteractionComponent::SetInteractionRadius(float NewRadius)
+{
+	InteractionRadius = FMath::Max(NewRadius, 1.0f);
+
+	// Before BeginPlay, or on a character that is not locally controlled, the sphere is not set up yet; BeginPlay applies the radius
+	if (!InteractionZone->IsRegistered())
+	{
+		return;
+	}
+
+	// Updating overlaps sends BeginOverlap / EndOverlap for objects that cross the new edge, so range enter / exit fire as usual
+	InteractionZone->SetSphereRadius(InteractionRadius, true);
 }
 
 // A candidate left the sphere: drop it, clear focus if it was the focused one, and stop the timer when none are left.
@@ -406,4 +443,17 @@ void UInteractionComponent::DoInteractReleased()
 	}
 
 	IInteractable::Execute_EndInteract(Interactable, OwnerCharacter);
+}
+
+TArray<AActor*> UInteractionComponent::GetNearbyInteractableActors() const
+{
+	TArray<AActor*> Result;
+	for (const TScriptInterface<IInteractable>& Interactable : NearbyInteractables)
+	{
+		if (AActor* Actor = Cast<AActor>(Interactable.GetObject()))
+		{
+			Result.Add(Actor);
+		}
+	}
+	return Result;
 }

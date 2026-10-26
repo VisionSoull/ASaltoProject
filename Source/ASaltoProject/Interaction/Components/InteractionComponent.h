@@ -28,7 +28,7 @@ public:
 	USceneComponent* TraceOrigin = nullptr;
 
 	/** How far the facing line reaches, in cm. Used for the aim line and the debug draw. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (ClampMin = 50.0, ClampMax = 1000.0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (ClampMin = 50.0, ClampMax = 10000.0))
 	float TraceDistance = 300.0f;
 
 	/** Radius of the aim sphere trace, in cm. A bigger value makes aiming more forgiving. */
@@ -87,7 +87,7 @@ protected:
 	USphereComponent* InteractionZone;
 
 	/** Radius of the interaction sphere, in cm. Doubles as the range that normalizes distance in the score. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (ClampMin = 50.0, ClampMax = 1000.0))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (ClampMin = 50.0, ClampMax = 10000.0))
 	float InteractionRadius = 250.0f;
 
 	/** Seconds between checks while candidates are nearby but none is focused. */
@@ -143,6 +143,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	bool IsFocusLocked() const { return bFocusLocked; }
 
+	/** Changes the interaction range at runtime, in cm. Objects that end up inside or outside the new sphere get OnRangeEntered / OnRangeExited. */
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	void SetInteractionRadius(float NewRadius);
+
+	/** Current interaction range, in cm. */
+	UFUNCTION(BlueprintPure, Category = "Interaction")
+	float GetInteractionRadius() const { return InteractionRadius; }
+
 	/** Call on interact press. Runs BeginInteract on the focused object (server directly, client through the server RPC). */
 	void DoInteractPressed();
 
@@ -174,6 +182,12 @@ protected:
 	void OnInteractionZoneEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
+	/** Adds Actor as a candidate if it is an interactable not already in range. Starts the check timer on the first one. */
+	void AddCandidate(AActor* Actor);
+
+	/** Overlap events only fire when something enters, so this picks up interactables that were already inside the sphere. */
+	void AddCurrentOverlaps();
+
 	/** Timer body: scores every candidate, keeps the best one with line of sight, and updates the focus. */
 	void CheckAimedInteractable();
 
@@ -194,4 +208,11 @@ protected:
 
 	/** Switches the check timer between idle and focused rates when needed */
 	void ApplyCheckInterval(bool bFocused);
+
+	// Interactables inside the zone
+	const TArray<TScriptInterface<IInteractable>>& GetNearbyInteractables() const { return NearbyInteractables; }
+
+	// Interactables inside the zone, for Blueprint usage
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
+	TArray<AActor*> GetNearbyInteractableActors() const;
 };

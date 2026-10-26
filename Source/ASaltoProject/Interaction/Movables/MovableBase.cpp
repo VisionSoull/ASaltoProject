@@ -3,11 +3,11 @@
 #include "MovableBase.h"
 #include "../Components/PushPullAnchorComponent.h"
 #include "../Components/PushPullComponent.h"
+#include "../Components/HandGripComponent.h"
 #include "../Components/InteractionFeedbackComponent.h"
 #include "../Settings/InteractionSettings.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Character.h"
-#include "PhysicsEngine/PhysicsHandleComponent.h"
 
 AMovableBase::AMovableBase(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.DoNotCreateDefaultSubobject(TEXT("Root")))
@@ -22,8 +22,6 @@ AMovableBase::AMovableBase(const FObjectInitializer& ObjectInitializer)
 
 	// Movables collide with the world and characters (the Interactable preset ignores them)
 	BaseMesh->SetCollisionProfileName(TEXT("Movable"));
-
-	DragHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("DragHandle"));
 
 	// Ticks only while someone holds it
 	PrimaryActorTick.bCanEverTick = true;
@@ -139,7 +137,8 @@ UPushPullAnchorComponent* AMovableBase::GetFreeAnchorClosestTo_Implementation(co
 	float ClosestDistSq = TNumericLimits<float>::Max();
 	for (UPushPullAnchorComponent* Anchor : Anchors)
 	{
-		if (IsAnchorTaken(Anchor))
+		// Taken, or on another face than the one already held (Very Heavy)
+		if (IsAnchorTaken(Anchor) || !IsOnHeldFace(Anchor))
 		{
 			continue;
 		}
@@ -156,7 +155,7 @@ UPushPullAnchorComponent* AMovableBase::GetFreeAnchorClosestTo_Implementation(co
 
 bool AMovableBase::RegisterMover_Implementation(UPushPullComponent* Mover, UPushPullAnchorComponent* Anchor)
 {
-	if (!Mover || !Anchor || bLocked || !MovableRules::IsWeightSupported(Weight) || IsMover(Mover) || IsAnchorTaken(Anchor))
+	if (!Mover || !Anchor || bLocked || !MovableRules::IsWeightSupported(Weight) || IsMover(Mover) || IsAnchorTaken(Anchor) || !IsOnHeldFace(Anchor))
 	{
 		return false;
 	}
@@ -181,9 +180,9 @@ void AMovableBase::UnregisterMover_Implementation(UPushPullComponent* Mover)
 	ACharacter* Character = Mover ? Cast<ACharacter>(Mover->GetOwner()) : nullptr;
 	Movers.RemoveAt(Index);
 
-	if (Movers.Num() == 0)
+	// Last mover gone: a still object stops ticking now, a sliding one settles in Tick first
+	if (Movers.Num() == 0 && !bDragging)
 	{
-		StopDrag();
 		SetActorTickEnabled(false);
 	}
 
@@ -235,8 +234,11 @@ void AMovableBase::Tick(float DeltaTime)
 	{
 		OnMoverReady(Character);
 	}
+
 	if (Movers.Num() == 0)
 	{
+		// Released while still sliding: keep ticking until it comes to rest
+		StopDragWhenAtRest();
 		return;
 	}
 
@@ -247,21 +249,28 @@ void AMovableBase::Tick(float DeltaTime)
 	}
 	const FVector Direction = Combined.GetSafeNormal2D();
 
-	// Very Heavy needs two characters pushing at once; if one stops, the object stops
+	// Very Heavy needs two characters pushing at once; if one stops, nobody is pushing
 	const bool bEnoughMovers = ReadyMovers >= MovableRules::GetRequiredMovers(Weight);
 	if (!bEnoughMovers || !bAllPushing || Direction.IsNearlyZero())
 	{
-		StopDrag();
+		// Friction slows it down; it becomes solid again once it rests
+		StopDragWhenAtRest();
 		return;
 	}
 
 	StartDrag();
 
-	FVector Target = BaseMesh->GetComponentLocation() + Direction * DragSpeed * DeltaTime;
-
-	// Stay on the floor it started on
-	Target.Z = DragGroundZ;
-	DragHandle->SetTargetLocation(Target);
+	// Push towards the drag speed, never harder than PushAcceleration: friction, ramps and walls resist on their own
+	const FVector Velocity = BaseMesh->GetPhysicsLinearVelocity();
+	const FVector HorizontalVelocity(Velocity.X, Velocity.Y, 0.f);
+	const FVector VelocityError = Direction * DragSpeed - HorizontalVelocity;
+	const FVector Acceleration = (VelocityError / FMath::Max(DeltaTime, KINDA_SMALL_NUMBER)).GetClampedToMaxSize(PushAcceleration);
+	// Closes a fraction of the speed gap each second instead of all of it in one frame: no wobble around the drag speed
+	//const FVector Acceleration = (VelocityError * PushResponse).GetClampedToMaxSize(PushAcceleration);
+	// Push low, near the base: a push above the edge that touches a ramp would flip the object over it
+	FVector PushPoint = BaseMesh->GetCenterOfMass();
+	PushPoint.Z = BaseMesh->Bounds.Origin.Z - BaseMesh->Bounds.BoxExtent.Z + PushHeight;
+	BaseMesh->AddForceAtLocation(Acceleration * BaseMesh->GetMass(), PushPoint);
 }
 
 void AMovableBase::StartDrag()
@@ -272,13 +281,10 @@ void AMovableBase::StartDrag()
 	}
 	bDragging = true;
 
-	DragGroundZ = BaseMesh->GetComponentLocation().Z;
-
 	// Physics only while dragged; the mover's capsule follows it, so it ignores pawns meanwhile
 	BaseMesh->SetSimulatePhysics(true);
 	BaseMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-	DragHandle->GrabComponentAtLocationWithRotation(BaseMesh, NAME_None, BaseMesh->GetComponentLocation(), BaseMesh->GetComponentRotation());
-
+	
 	OnDragStarted();
 }
 
@@ -290,7 +296,6 @@ void AMovableBase::StopDrag()
 	}
 	bDragging = false;
 
-	DragHandle->ReleaseComponent();
 	BaseMesh->SetSimulatePhysics(false);
 	BaseMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 
@@ -319,4 +324,54 @@ bool AMovableBase::IsMover(const UPushPullComponent* Mover) const
 bool AMovableBase::IsAnchorTaken(const UPushPullAnchorComponent* Anchor) const
 {
 	return Movers.ContainsByPredicate([Anchor](const FMovableMoverSlot& Slot) { return Slot.Anchor == Anchor; });
+}
+
+bool AMovableBase::IsOnHeldFace(const UPushPullAnchorComponent* Anchor) const
+{
+	if (MovableRules::GetRequiredMovers(Weight) <= 1 || Movers.Num() == 0 || !Movers[0].Anchor || !Anchor)
+	{
+		return true;
+	}
+
+	return MovableRules::AreOnSameFace(Movers[0].Anchor->GetForwardVector(), Anchor->GetForwardVector());
+}
+
+void AMovableBase::StopDragWhenAtRest()
+{
+	if (bDragging && BaseMesh->GetPhysicsLinearVelocity().Size() > RestSpeed)
+	{
+		return;
+	}
+
+	StopDrag();
+	if (Movers.Num() == 0)
+	{
+		SetActorTickEnabled(false);
+	}
+}
+
+// ---------------- Hand grips ----------------
+
+void AMovableBase::FindHandGrips(const USceneComponent* Under, UHandGripComponent*& OutLeft, UHandGripComponent*& OutRight) const
+{
+	OutLeft = nullptr;
+	OutRight = nullptr;
+
+	TInlineComponentArray<UHandGripComponent*> Grips(this);
+	for (UHandGripComponent* Grip : Grips)
+	{
+		// Under an anchor: only that anchor's grips. Otherwise: the grips that are not under any anchor
+		const USceneComponent* Parent = Grip->GetAttachParent();
+		const bool bMatches = Under ? Parent == Under : !Cast<UPushPullAnchorComponent>(Parent);
+		if (!bMatches)
+		{
+			continue;
+		}
+
+		UHandGripComponent*& Target = Grip->Side == EHandSide::Left ? OutLeft : OutRight;
+		if (!Target)
+		{
+			Target = Grip;
+		}
+	}
 }

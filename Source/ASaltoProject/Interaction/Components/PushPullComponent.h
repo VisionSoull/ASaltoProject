@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "../Movables/MovableTypes.h"
+#include "../Movables/EMovableTypes.h"
 #include "PushPullComponent.generated.h"
 
 class ACharacter;
@@ -28,6 +28,14 @@ public:
 	/** Seconds to slide into the grab spot before pushing starts. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PushPull", meta = (ClampMin = 0.0, ClampMax = 2.0, Units = "s"))
 	float AimingDuration = 0.2f;
+
+	/** How far below the character's feet the floor probe looks at the grab spot, in cm (covers ramps and small steps). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PushPull", meta = (ClampMin = 0.0, Units = "cm"))
+	float StandFloorProbeRange = 100.f;
+
+	/** Gap kept between the character's feet and the floor while holding, in cm, so the capsule does not scrape it. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PushPull", meta = (ClampMin = 0.0, Units = "cm"))
+	float StandFloorClearance = 2.f;
 
 	UPROPERTY(BlueprintAssignable, Category = "PushPull")
 	FOnPushPullObjectEvent OnGrabbed;
@@ -85,6 +93,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PushPull")
 	float GetMoveSpeed() const { return MoveSpeed; }
 
+	/** World positions for hand IK while pushing / pulling: the grips under the held anchor. A hand without a grip gets false. */
+	UFUNCTION(BlueprintPure, Category = "PushPull")
+	void GetHandTargets(FVector& OutLeftLocation, FVector& OutRightLocation, bool& bOutHasLeft, bool& bOutHasRight) const;
+
+	/** World rotations of the grips under the held anchor, to turn the hands. Zero for a hand without a grip. */
+	UFUNCTION(BlueprintPure, Category = "PushPull")
+	void GetHandTargetRotations(FRotator& OutLeftRotation, FRotator& OutRightRotation) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -98,6 +114,9 @@ private:
 
 	/** Keeps the interaction focus on the held object, or frees it. */
 	void LockFocus(bool bLock);
+
+	/** Where the character stands at its grab spot: the anchor's X/Y, on the floor below it. */
+	FVector ComputeStandLocation() const;
 
 	UPROPERTY()
 	TObjectPtr<ACharacter> OwnerCharacter = nullptr;

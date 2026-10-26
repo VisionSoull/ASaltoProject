@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
 #include "EMovableWeightType.h"
-#include "MovableTypes.h"
+#include "EMovableTypes.h"
 #include "Movable.generated.h"
 
 class UPushPullComponent;
