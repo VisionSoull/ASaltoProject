@@ -105,6 +105,10 @@ private:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status", meta = (AllowPrivateAccess = "true"))
     bool bPanicLatched;
 
+    // Turns the panic system on or off (also editable while playing)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Debug", meta = (AllowPrivateAccess = "true"))
+    bool bPanicEnabled = true;
+
     // Stress sources
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stress Sources", meta = (AllowPrivateAccess = "true"))
     TMap<EStressSource, FStressSourceData> StressSources;
@@ -120,7 +124,6 @@ private:
     float LastStress;
     EEmotionalState LastEmotionalState;
     FTimerHandle EvaluationTimer;
-    bool bPanicEnabled = true;
 
 public:
     // Events
