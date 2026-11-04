@@ -86,7 +86,7 @@ void AMovableLockZone::Tick(float DeltaTime)
 		}
 
 		// Not the movable this zone wants, or already locked by something else (puzzle, cutscene): leave it alone
-		if ((RequiredMovable && Movable != RequiredMovable) || IMovable::Execute_IsLocked(Movable))
+		if ((RequiredMovable && Movable != RequiredMovable) || IMovable::Execute_IsLocked(Movable) || Movable->IsCarried())
 		{
 			continue;
 		}

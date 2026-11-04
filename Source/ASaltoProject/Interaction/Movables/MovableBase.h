@@ -12,6 +12,7 @@ class UPushPullAnchorComponent;
 class UPushPullComponent;
 class AMovableBase;
 class UHandGripComponent;
+class UCarryComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMovableLockChanged, AMovableBase*, Movable);
 
@@ -57,7 +58,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable")
 	EPushPullMode PushPullMode = EPushPullMode::PushAndPull;
 
-	/** Single Axis: moves only along the grabbed side's axis. Free: moves in any direction on the ground (Push Pull Mode is ignored). */
+	/** Forward / Back, Left / Right, both without diagonals, or Free. Push Pull Mode only limits the forward / back part. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable")
 	EMoveConstraint MoveConstraint = EMoveConstraint::SingleAxis;
 
@@ -79,6 +80,34 @@ public:
 	/** Below this speed (cm/s) a released object counts as stopped and becomes solid again. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movable", meta = (ClampMin = 0.0, ForceUnits = "cm/s"))
 	float RestSpeed = 5.f;
+
+	/** Light only: walking speed multiplier while carrying it (1 = normal speed). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable|Carry", meta = (ClampMin = 0.1, ClampMax = 1.0, EditCondition = "Weight == EMovableWeight::Light", EditConditionHides))
+	float CarrySpeedMultiplier = 0.7f;
+
+	/** Very Light only: where the object sits relative to the hand bone that holds it. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable|Carry", meta = (EditCondition = "Weight == EMovableWeight::VeryLight", EditConditionHides))
+	FVector HandLocationOffset = FVector::ZeroVector;
+
+	/** Very Light only: rotation of the object relative to the hand bone that holds it. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable|Carry", meta = (EditCondition = "Weight == EMovableWeight::VeryLight", EditConditionHides))
+	FRotator HandRotationOffset = FRotator::ZeroRotator;
+
+	/** Light only: where the object sits relative to the character (X forward, Z up from the capsule centre), in cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable|Carry", meta = (EditCondition = "Weight == EMovableWeight::Light", EditConditionHides))
+	FVector CarryLocationOffset = FVector(50.f, 0.f, 0.f);
+
+	/** Light only: rotation of the object relative to the character. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable|Carry", meta = (EditCondition = "Weight == EMovableWeight::Light", EditConditionHides))
+	FRotator CarryRotationOffset = FRotator::ZeroRotator;
+
+	/** Very Light only: speed the object leaves the hand at when thrown, in cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable|Carry", meta = (ClampMin = 0.0, ForceUnits = "cm/s", EditCondition = "Weight == EMovableWeight::VeryLight", EditConditionHides))
+	float ThrowSpeed = 900.f;
+
+	/** Very Light only: how far above the character's facing the throw goes, in degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable|Carry", meta = (ClampMin = 0.0, ClampMax = 80.0, Units = "deg", EditCondition = "Weight == EMovableWeight::VeryLight", EditConditionHides))
+	float ThrowUpAngle = 20.f;
 
 	/** Fired when the object gets locked (lock zone, Blueprint). */
 	UPROPERTY(BlueprintAssignable, Category = "Movable")
@@ -107,8 +136,29 @@ public:
 	/** Grips for hand IK. Under: the anchor pushed from, or null for the grips placed directly on the object (carrying). */
 	void FindHandGrips(const USceneComponent* Under, UHandGripComponent*& OutLeft, UHandGripComponent*& OutRight) const;
 
+	/** True while a character carries this object (Very Light / Light). */
+	UFUNCTION(BlueprintPure, Category = "Movable")
+	bool IsCarried() const { return Carrier != nullptr; }
+
+	/** The character carrying this object, or null. */
+	UFUNCTION(BlueprintPure, Category = "Movable")
+	ACharacter* GetCarrierCharacter() const;
+
+	/** Called by UCarryComponent before attaching: physics off while in the hands. */
+	void HandlePickedUp(UCarryComponent* InCarrier);
+
+	/** Called by UCarryComponent after detaching: physics back on. */
+	void HandleDropped();
+
+	/** Called by UCarryComponent after detaching: physics back on and launched at LaunchVelocity (cm/s). */
+	void HandleThrown(const FVector& LaunchVelocity);
+
+	/** Called by UCarryComponent when Character could not pick this object up. */
+	void HandlePickUpFailed(ACharacter* Character, EGrabFailReason Reason);
+
 protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 
 	// IInteractable interface
@@ -152,6 +202,22 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Movable", meta = (DisplayName = "Unlocked"))
 	void ReceiveUnlocked();
 
+	/** Character picked this object up (hide the prompt, affect other interactables...). */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Movable")
+	void OnPickedUp(ACharacter* Character);
+
+	/** Character put this object down. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Movable")
+	void OnDropped(ACharacter* Character);
+
+	/** Character threw this object. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Movable")
+	void OnThrown(ACharacter* Character);
+
+	/** Character tried to pick this object up and could not (Reason says why). */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Movable")
+	void OnPickUpFailed(ACharacter* Character, EGrabFailReason Reason);
+
 	/** Starts locked when true (e.g. already in place). Lock and Unlock change it while playing. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movable")
 	bool bLocked = false;
@@ -171,6 +237,10 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<FMovableMoverSlot> Movers;
+
+	/** Who carries this object (Very Light / Light), or null. */
+	UPROPERTY(Transient)
+	TObjectPtr<UCarryComponent> Carrier = nullptr;
 
 	bool bDragging = false;
 };

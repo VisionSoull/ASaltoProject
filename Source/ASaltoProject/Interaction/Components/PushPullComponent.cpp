@@ -8,6 +8,7 @@
 #include "../Movables/Movable.h"
 #include "PushPullAnchorComponent.h"
 #include "HandGripComponent.h"
+#include "CarryComponent.h"
 #include "../Movables/MovableBase.h"
 #include "../Interactables/InteractableBase.h"
 #include "../Settings/InteractionSettings.h"
@@ -42,7 +43,9 @@ bool UPushPullComponent::TryGrab(AActor* Object)
 		return false;
 	}
 
-	if (HeldObject)
+	// One thing at a time: not while already pushing or carrying
+	const UCarryComponent* Carry = OwnerCharacter->FindComponentByClass<UCarryComponent>();
+	if (HeldObject || (Carry && Carry->IsCarrying()))
 	{
 		FailGrab(Object, EGrabFailReason::AlreadyHolding);
 		return false;
@@ -99,6 +102,8 @@ bool UPushPullComponent::TryGrab(AActor* Object)
 
 	LastLocation = AimStartLocation;
 	MoveSpeed = 0.f;
+	MoveSpeedFoward = 0.f;
+	MoveSpeedSide = 0.f;
 
 	LockMovement(true);
 	LockFocus(true);
@@ -125,6 +130,8 @@ void UPushPullComponent::Release()
 	PushAmount = 0.f;
 	DragInput = FVector::ZeroVector;
 	MoveSpeed = 0.f;
+	MoveSpeedFoward = 0.f;
+	MoveSpeedSide = 0.f;
 
 	if (IsValid(Object))
 	{
@@ -181,14 +188,24 @@ void UPushPullComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		return;
 	}
 
-	// Speed the character moved at since last frame, for the Anim BP (CharacterMovement's velocity stays 0)
-	const FVector CurrentLocation = OwnerCharacter->GetActorLocation();
-	MoveSpeed = DeltaTime > 0.f ? FVector::Dist2D(CurrentLocation, LastLocation) / DeltaTime : 0.f;
-	LastLocation = CurrentLocation;
-
 	// Anchor's X/Y on the floor, so the character never floats with a tilted object
 	const FVector StandLocation = ComputeStandLocation();
 	const FRotator Facing(0.f, HeldAnchor->GetComponentRotation().Yaw, 0.f);
+
+	// Speed the character moved at since last frame, for the Anim BP (CharacterMovement's velocity stays 0)
+	const FVector CurrentLocation = OwnerCharacter->GetActorLocation();
+	const FVector FrameDelta(CurrentLocation.X - LastLocation.X, CurrentLocation.Y - LastLocation.Y, 0.f);
+	const float InvDelta = DeltaTime > 0.f ? 1.f / DeltaTime : 0.f;
+
+	MoveSpeed = FrameDelta.Size() * InvDelta;
+
+	// Signed split along the push/pull axis:
+	//  Foward: + towards the object (push) / - away (pull)
+	//  Side:   + to the character's right / - to the left
+	MoveSpeedFoward = FVector::DotProduct(FrameDelta, Facing.Vector()) * InvDelta;
+	MoveSpeedSide = FVector::DotProduct(FrameDelta, FRotationMatrix(Facing).GetScaledAxis(EAxis::Y)) * InvDelta;
+
+	LastLocation = CurrentLocation;
 
 	if (!bIsAligned)
 	{

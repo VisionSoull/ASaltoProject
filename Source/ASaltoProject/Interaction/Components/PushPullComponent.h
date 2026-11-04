@@ -91,6 +91,16 @@ public:
 	/** How fast push/pull moves the character (sliding to the grab spot, then following the object), in cm/s.
 	*  CharacterMovement's velocity stays 0 while holding, so the Anim BP reads this instead. */
 	UFUNCTION(BlueprintPure, Category = "PushPull")
+	float GetMoveSpeedFoward() const { return MoveSpeedFoward; }
+
+	/** How fast push/pull moves the character (sliding to the grab spot, then following the object), in cm/s.
+	*  CharacterMovement's velocity stays 0 while holding, so the Anim BP reads this instead. */
+	UFUNCTION(BlueprintPure, Category = "PushPull")
+	float GetMoveSpeedSide() const { return MoveSpeedSide; }
+
+	/** How fast push/pull moves the character (sliding to the grab spot, then following the object), in cm/s.
+	*  CharacterMovement's velocity stays 0 while holding, so the Anim BP reads this instead. */
+	UFUNCTION(BlueprintPure, Category = "PushPull")
 	float GetMoveSpeed() const { return MoveSpeed; }
 
 	/** World positions for hand IK while pushing / pulling: the grips under the held anchor. A hand without a grip gets false. */
@@ -132,6 +142,8 @@ private:
 
 	FVector DragInput = FVector::ZeroVector;
 
+	float MoveSpeedFoward = 0.f;
+	float MoveSpeedSide = 0.f;
 	float MoveSpeed = 0.f;
 	FVector LastLocation = FVector::ZeroVector;
 

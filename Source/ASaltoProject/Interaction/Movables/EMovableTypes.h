@@ -52,10 +52,14 @@ enum class EPushPullMode : uint8
 UENUM(BlueprintType)
 enum class EMoveConstraint : uint8
 {
-	/** Only along the axis of the grabbed side (push / pull) */
-	SingleAxis	UMETA(DisplayName = "Single Axis"),
+	/** Only forward / back, along the axis of the grabbed side (push / pull) */
+	SingleAxis	UMETA(DisplayName = "Forward / Back"),
+	/** Only left / right, sliding along the grabbed side */
+	SideAxis	UMETA(DisplayName = "Left / Right"),
+	/** Forward / back or left / right, whichever the input leans to more; never diagonal */
+	BothAxes	UMETA(DisplayName = "Forward / Back + Left / Right"),
 	/** In any direction on the ground, following the movement input */
-	Free
+	Free		UMETA(DisplayName = "Free")
 };
 
 /** Which hand a grip point is for. */

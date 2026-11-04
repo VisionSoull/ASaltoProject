@@ -3,6 +3,7 @@
 #include "MovableBase.h"
 #include "../Components/PushPullAnchorComponent.h"
 #include "../Components/PushPullComponent.h"
+#include "../Components/CarryComponent.h"
 #include "../Components/HandGripComponent.h"
 #include "../Components/InteractionFeedbackComponent.h"
 #include "../Settings/InteractionSettings.h"
@@ -28,9 +29,24 @@ AMovableBase::AMovableBase(const FObjectInitializer& ObjectInitializer)
 	PrimaryActorTick.bStartWithTickEnabled = false;
 }
 
+void AMovableBase::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Carried objects lie loose in the world: they fall, roll and can be knocked over
+	if (MovableRules::IsCarryWeight(Weight) && !bLocked)
+	{
+		BaseMesh->SetSimulatePhysics(true);
+	}
+}
+
 void AMovableBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	ReleaseAllMovers();
+	if (Carrier)
+	{
+		Carrier->Drop();
+	}
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -46,6 +62,16 @@ void AMovableBase::Lock()
 
 	ReleaseAllMovers();
 	StopDrag();
+	if (Carrier)
+	{
+		Carrier->Drop();
+	}
+
+	// A locked loose object stays where it is
+	if (MovableRules::IsCarryWeight(Weight))
+	{
+		BaseMesh->SetSimulatePhysics(false);
+	}
 	ReceiveLocked();
 	OnLocked.Broadcast(this);
 }
@@ -57,6 +83,10 @@ void AMovableBase::Unlock()
 		return;
 	}
 	bLocked = false;
+	if (MovableRules::IsCarryWeight(Weight))
+	{
+		BaseMesh->SetSimulatePhysics(true);
+	}
 	ReceiveUnlocked();
 	OnUnlocked.Broadcast(this);
 }
@@ -78,6 +108,25 @@ void AMovableBase::ReleaseAllMovers()
 
 void AMovableBase::BeginInteract_Implementation(ACharacter* Character)
 {
+	if (MovableRules::IsCarryWeight(Weight))
+	{
+		UCarryComponent* Carry = Character ? Character->FindComponentByClass<UCarryComponent>() : nullptr;
+		if (!Carry)
+		{
+			return;
+		}
+
+		// Already in this character's hands: the press starts a drop or a throw, decided on release
+		if (Carry->GetCarriedObject() == this)
+		{
+			Carry->BeginRelease();
+			return;
+		}
+
+		Carry->TryPickUp(this);
+		return;
+	}
+
 	UPushPullComponent* PushPull = Character ? Character->FindComponentByClass<UPushPullComponent>() : nullptr;
 	if (!PushPull)
 	{
@@ -96,6 +145,16 @@ void AMovableBase::BeginInteract_Implementation(ACharacter* Character)
 
 void AMovableBase::EndInteract_Implementation(ACharacter* Character)
 {
+	if (MovableRules::IsCarryWeight(Weight))
+	{
+		UCarryComponent* Carry = Character ? Character->FindComponentByClass<UCarryComponent>() : nullptr;
+		if (Carry && Carry->GetCarriedObject() == this)
+		{
+			Carry->FinishRelease();
+		}
+		return;
+	}
+
 	if (GrabMode != EGrabMode::Hold)
 	{
 		return;
@@ -214,15 +273,39 @@ void AMovableBase::Tick(float DeltaTime)
 			NewlyReady.Add(Cast<ACharacter>(Slot.Mover->GetOwner()));
 		}
 
-		const FVector Axis = Slot.Anchor->GetForwardVector().GetSafeNormal2D();
+		// Forward axis of the grabbed side, or the sideways axis along it for Left / Right
+		const FVector Axis = MoveConstraint == EMoveConstraint::SideAxis
+			? Slot.Anchor->GetRightVector().GetSafeNormal2D()
+			: Slot.Anchor->GetForwardVector().GetSafeNormal2D();
 		if (FirstAxis.IsNearlyZero())
 		{
 			FirstAxis = Axis;
 		}
 
-		const FVector Contribution = MoveConstraint == EMoveConstraint::Free
-			? Slot.Mover->GetDragInput()
-			: Axis * Slot.Mover->GetPushAmount();
+		// Push / pull part (respects Push Pull Mode) and sideways part of this mover's input
+		const FVector ForwardPart = Slot.Anchor->GetForwardVector().GetSafeNormal2D() * Slot.Mover->GetPushAmount();
+		const FVector SidePart = MovableRules::ProjectOnAxis(Slot.Mover->GetDragInput(), Slot.Anchor->GetRightVector());
+
+		FVector Contribution = FVector::ZeroVector;
+		switch (MoveConstraint)
+		{
+		case EMoveConstraint::SingleAxis:
+			Contribution = ForwardPart;
+			break;
+
+		case EMoveConstraint::SideAxis:
+			Contribution = SidePart;
+			break;
+
+		case EMoveConstraint::BothAxes:
+			// Whichever the input leans to more: never diagonal
+			Contribution = ForwardPart.SizeSquared() >= SidePart.SizeSquared() ? ForwardPart : SidePart;
+			break;
+
+		case EMoveConstraint::Free:
+			Contribution = Slot.Mover->GetDragInput();
+			break;
+		}
 
 		Combined += Contribution;
 		bAllPushing &= !Contribution.IsNearlyZero();
@@ -242,10 +325,25 @@ void AMovableBase::Tick(float DeltaTime)
 		return;
 	}
 
-	// Single Axis: keep only the axis of the first grab spot
-	if (MoveConstraint == EMoveConstraint::SingleAxis)
+	// Keep the result on the allowed axis of the first grab spot
+	switch (MoveConstraint)
 	{
+	case EMoveConstraint::SingleAxis:
+	case EMoveConstraint::SideAxis:
 		Combined = MovableRules::ProjectOnAxis(Combined, FirstAxis);
+		break;
+
+	case EMoveConstraint::BothAxes:
+	{
+		// Two movers could ask for different axes: keep the stronger one, so it never goes diagonal
+		const FVector AlongForward = MovableRules::ProjectOnAxis(Combined, FirstAxis);
+		const FVector AlongSide = MovableRules::ProjectOnAxis(Combined, FVector::CrossProduct(FVector::UpVector, FirstAxis));
+		Combined = AlongForward.SizeSquared() >= AlongSide.SizeSquared() ? AlongForward : AlongSide;
+		break;
+	}
+
+	case EMoveConstraint::Free:
+		break;
 	}
 	const FVector Direction = Combined.GetSafeNormal2D();
 
@@ -374,4 +472,51 @@ void AMovableBase::FindHandGrips(const USceneComponent* Under, UHandGripComponen
 			Target = Grip;
 		}
 	}
+}
+
+
+// ---------------- Carry ----------------
+
+ACharacter* AMovableBase::GetCarrierCharacter() const
+{
+	return Carrier ? Cast<ACharacter>(Carrier->GetOwner()) : nullptr;
+}
+
+void AMovableBase::HandlePickedUp(UCarryComponent* InCarrier)
+{
+	Carrier = InCarrier;
+
+	// A simulating body cannot follow an attach parent, so physics goes off before the carrier attaches it
+	BaseMesh->SetSimulatePhysics(false);
+	BaseMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+
+	OnPickedUp(GetCarrierCharacter());
+}
+
+void AMovableBase::HandleDropped()
+{
+	ACharacter* Character = GetCarrierCharacter();
+	Carrier = nullptr;
+
+	BaseMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	BaseMesh->SetSimulatePhysics(true);
+
+	OnDropped(Character);
+}
+
+void AMovableBase::HandleThrown(const FVector& LaunchVelocity)
+{
+	ACharacter* Character = GetCarrierCharacter();
+	Carrier = nullptr;
+
+	BaseMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	BaseMesh->SetSimulatePhysics(true);
+	BaseMesh->SetPhysicsLinearVelocity(LaunchVelocity);
+
+	OnThrown(Character);
+}
+
+void AMovableBase::HandlePickUpFailed(ACharacter* Character, EGrabFailReason Reason)
+{
+	OnPickUpFailed(Character, Reason);
 }
